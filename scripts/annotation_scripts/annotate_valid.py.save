@@ -1,0 +1,139 @@
+from pycocotools import mask as maskUtils
+import json
+import cv2
+import os
+import numpy as np
+
+
+ff = open("output.pkl.json")
+data = json.load(ff)
+print(len(data))
+#print(data[0].keys())
+valid_dir = "data/valid/JPEGImages/421/"
+train_dir = "data/train/JPEGImages"
+train_annotations= "data/annotations/instances_train_sub.json"
+save_dir = "data/save/"
+
+def apply_mask(image, mask, color, alpha=0.5):
+    """Apply the given mask to the image.
+    """
+    for c in range(3):
+        image[:, :, c] = np.where(mask == 1,
+                                  image[:, :, c] *
+                                  (1 - alpha) + alpha * color[c] * 255,
+                                  image[:, :, c])
+    return image
+
+
+i = 0
+
+gt_file = open(train_annotations,'r')
+data_gt = json.load(gt_file)
+
+for path in sorted(os.listdir(valid_dir)):
+	im = cv2.imread(os.path.join(valid_dir,path))
+	segm_pancreas = data[0]['segmentations'][i]
+	#segm_cancer = data[3]['segmentations'][i]
+	
+	#red is cancer predicted
+	#green is pancreas predicted
+
+	if segm_pancreas: 
+		mask = maskUtils.decode(segm_pancreas)
+		padded_mask = np.zeros((mask.shape[0] + 2, mask.shape[1] + 2), dtype=np.uint8)
+		padded_mask[1:-1, 1:-1] = mask
+		im = apply_mask(im, mask, (0.0,1,0.0)).astype(np.uint8)
+	"""
+	if segm_cancer:
+		mask = maskUtils.decode(segm_cancer)
+		padded_mask = np.zeros((mask.shape[0] + 2, mask.shape[1] + 2), dtype=np.uint8)
+		padded_mask[1:-1, 1:-1] = mask
+		im = apply_mask(im, mask, (0.0,0.0,1)).astype(np.uint8)
+	"""	
+	cv2.putText(im, "Prediction", (10,50),cv2.FONT_HERSHEY_SIMPLEX,1, (255,255,255), 1)
+            
+	cv2.imwrite(os.path.join(save_dir,str(i)+".jpg"),im)
+	i = i+1
+
+
+"""
+   	print(data[0]["score"])
+        print(data[0]["category_id"])
+        print(data[1]["score"])
+        print(data[1]["category_id"])
+        print(data[2]["score"])
+        print(data[2]["category_id"])
+        print(data[3]["score"])
+        print(data[3]["category_id"])
+        print(data[4]["score"])
+        print(data[4]["category_id"])
+        print(data[5]["score"])
+        print(data[5]["category_id"])
+
+
+0.18806762993335724
+1
+0.30180230736732483
+1
+0.7768524289131165
+1
+0.22801423072814941
+2
+0.1430695354938507
+2
+"""
+
+i = 0
+
+def get_anns(vid):
+	for anns in data_gt["annotations"]:
+		if anns["video_id"] == vid and anns["category_id"]== 1:
+			pancreas = anns["segmentations"]
+		if anns["video_id"] == vid and anns["category_id"]== 2:
+			cancer = anns["segmentations"]
+
+	return pancreas, cancer
+
+frames_map = {}
+
+def get_frames():
+	for v in data_gt["videos"]:
+		frames_map[v["id"]] = { "len" :v["length"] , "frames" :v["file_names"] }
+
+get_frames()		
+
+
+for vid in sorted(os.listdir(train_dir)):
+	v_id = int(vid)
+	if v_id in frames_map:
+		frames_list = frames_map[v_id]["frames"] 
+		pancreas, cancer = get_anns(v_id)
+		os.mkdir(os.path.join("data/gt",vid))
+
+		for frame_id in range(len(frames_list)):	
+			im_gt = cv2.imread(os.path.join(train_dir,frames_list[frame_id]))
+			ht, wt = im_gt.shape[:2]
+				
+		
+			segm = pancreas[frame_id]
+			if segm:
+				rles = maskUtils.frPyObjects(segm, ht, wt)
+				rle = maskUtils.merge(rles)			
+				mask = maskUtils.decode(rle)
+				padded_mask = np.zeros((mask.shape[0] + 2, mask.shape[1] + 2), dtype=np.uint8)
+				padded_mask[1:-1, 1:-1] = mask
+				im_gt = apply_mask(im_gt, mask, (0.0,1,0.0)).astype(np.uint8)
+
+			segm = cancer[frame_id]
+			if segm:
+				rles = maskUtils.frPyObjects(segm, ht, wt)
+				rle = maskUtils.merge(rles)
+				mask = maskUtils.decode(rle)
+				padded_mask = np.zeros((mask.shape[0] + 2, mask.shape[1] + 2), dtype=np.uint8)
+				padded_mask[1:-1, 1:-1] = mask
+				im_gt = apply_mask(im_gt, mask, (0.0,0.0,1)).astype(np.uint8)
+
+			cv2.putText(im_gt, "Ground Truth", (10,50),cv2.FONT_HERSHEY_SIMPLEX,1, (255,255,255), 1)
+
+			file_name = frames_list[frame_id].split("/")[-1]
+			cv2.imwrite(os.path.join("data/gt/"+vid,file_name),im_gt)
